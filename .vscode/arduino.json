@@ -1,0 +1,5 @@
+{
+    "board": "arduino:avr:mega",
+    "port": "COM6",
+    "sketch": "ParkingLotSystem.ino"
+}

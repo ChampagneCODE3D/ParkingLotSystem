@@ -1,0 +1,192 @@
+#include <Servo.h>
+
+// Ultrasonic pins
+const int TRIG_PIN = 7;
+const int ECHO_PIN = 6;
+
+// Sensors
+const int TOUCH_PIN = 9;       // Touch sensor
+const int LIMIT_PIN = 11;      // Limit switch
+const int OVERRIDE_PIN = 8;    // Override button
+const int BUZZER_PIN = 2;      // Buzzer
+
+// LEDs
+const int LED_RED = 3;
+const int LED_YELLOW = 4;
+const int LED_GREEN = 5;
+
+// Servo
+Servo gateServo;
+const int SERVO_PIN = 10;
+
+// Gate state
+bool gateOpen = false;
+bool waitingToClose = false;
+unsigned long closeTimer = 0;
+
+// Buzzer state
+unsigned long buzzerTimer = 0;
+bool buzzerState = false;
+
+void runBuzzerSelfTest() {
+  Serial.println("Buzzer self-test: ON");
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(350);
+  digitalWrite(BUZZER_PIN, LOW);
+  Serial.println("Buzzer self-test: OFF");
+}
+
+float getDistance() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+  if (duration == 0) return -1;
+
+  return (duration * 0.0343f) / 2.0f;
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  pinMode(TOUCH_PIN, INPUT);
+  pinMode(LIMIT_PIN, INPUT_PULLUP);
+  pinMode(OVERRIDE_PIN, INPUT_PULLUP);
+
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  pinMode(LED_RED, OUTPUT);
+  pinMode(LED_YELLOW, OUTPUT);
+  pinMode(LED_GREEN, OUTPUT);
+
+  runBuzzerSelfTest();
+
+  gateServo.attach(SERVO_PIN);
+  gateServo.write(0);  // gate closed
+}
+
+void loop() {
+  float d = getDistance();
+
+  bool touchPressed = digitalRead(TOUCH_PIN) == HIGH;
+  bool limitPressed = digitalRead(LIMIT_PIN) == LOW;
+  // Active-low button: pressed = LOW (false level), released = HIGH (true level).
+  bool buttonReleased = (digitalRead(OVERRIDE_PIN) == HIGH);
+  bool buttonPressed = !buttonReleased;
+
+  // Debug output
+  Serial.print("Distance: ");
+  Serial.print(d);
+  Serial.print(" | TOUCH: ");
+  Serial.print(touchPressed ? "PRESSED" : "RELEASED");
+  Serial.print(" | LIMIT: ");
+  Serial.print(limitPressed ? "PRESSED" : "RELEASED");
+  Serial.print(" | BTN: ");
+  Serial.print(buttonPressed ? "PRESSED(MUTE)" : "RELEASED");
+  Serial.print(" | WAITING: ");
+  Serial.print(waitingToClose ? "YES" : "NO");
+  Serial.print(" | GATE: ");
+  Serial.println(gateOpen ? "OPEN" : "CLOSED");
+
+  // -------------------------
+  // LED ZONES
+  // -------------------------
+  if (d >= 30) {
+    digitalWrite(LED_GREEN, HIGH);
+    digitalWrite(LED_YELLOW, LOW);
+    digitalWrite(LED_RED, LOW);
+  }
+  else if (d > 10) {
+    digitalWrite(LED_GREEN, LOW);
+    digitalWrite(LED_YELLOW, HIGH);
+    digitalWrite(LED_RED, LOW);
+  }
+  else if (d >= 0) {
+    digitalWrite(LED_GREEN, LOW);
+    digitalWrite(LED_YELLOW, LOW);
+    digitalWrite(LED_RED, HIGH);
+  }
+
+  // -------------------------
+  // BUZZER LOGIC (graded beeps)
+  // -------------------------
+
+  bool redZone = (d <= 10 && d >= 0);
+  bool yellowZone = (d > 10 && d < 30);
+  bool greenZone = (d >= 30);
+
+  if (buttonPressed) {
+    // Manual silence while button is pressed.
+    digitalWrite(BUZZER_PIN, LOW);
+    buzzerState = false;
+  }
+  else if (gateOpen || waitingToClose) {
+    // No buzzer while gate is open or closing
+    digitalWrite(BUZZER_PIN, LOW);
+    buzzerState = false;
+  }
+  else if (greenZone) {
+    // Silent
+    digitalWrite(BUZZER_PIN, LOW);
+    buzzerState = false;
+  }
+  else if (yellowZone) {
+    // Slow beep (600 ms)
+    if (millis() - buzzerTimer >= 600) {
+      buzzerTimer = millis();
+      buzzerState = !buzzerState;
+      digitalWrite(BUZZER_PIN, buzzerState);
+    }
+  }
+  else if (redZone) {
+    // Fast beep (200 ms)
+    if (millis() - buzzerTimer >= 200) {
+      buzzerTimer = millis();
+      buzzerState = !buzzerState;
+      digitalWrite(BUZZER_PIN, buzzerState);
+    }
+  }
+
+  // -------------------------
+  // GATE LOGIC WITH 5-SECOND DELAY
+  // -------------------------
+
+  // 1. OPEN GATE (only once)
+  if (!gateOpen && (d <= 5 && d >= 0) && limitPressed) {
+    gateOpen = true;
+    waitingToClose = false;
+    gateServo.write(90);   // OPEN
+  }
+
+  // 2. KEEP GATE OPEN while either sensor is pressed
+  if (gateOpen && (limitPressed || touchPressed)) {
+    waitingToClose = false;  // cancel any close countdown
+    gateServo.write(90);
+  }
+
+  // 3. START CLOSE COUNTDOWN when both sensors released
+  if (gateOpen && !limitPressed && !touchPressed && !waitingToClose) {
+    waitingToClose = true;
+    closeTimer = millis();  // start 5-second timer
+  }
+
+  // 4. IF waiting AND touch sensor triggers again → reset timer
+  if (waitingToClose && touchPressed) {
+    waitingToClose = false;  // cancel countdown
+  }
+
+  // 5. AFTER 5 SECONDS → CLOSE GATE
+  if (waitingToClose && (millis() - closeTimer >= 5000)) {
+    gateOpen = false;
+    waitingToClose = false;
+    gateServo.write(0);   // CLOSE
+  }
+
+  delay(50);
+}

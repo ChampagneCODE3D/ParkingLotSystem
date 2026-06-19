@@ -1,0 +1,25 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Arduino: Verify (Mega COM6)",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "compile",
+        "--fqbn",
+        "arduino:avr:mega",
+        "."
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Arduino: Upload (Mega COM6)",
+      "type": "shell",
+      "command": "$ErrorActionPreference = 'Continue'; Write-Host 'Upload attempt 1/2'; arduino-cli upload -p COM6 --fqbn arduino:avr:mega .; if ($LASTEXITCODE -ne 0) { Write-Host 'Upload attempt 2/2'; arduino-cli upload -p COM6 --fqbn arduino:avr:mega .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }",
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -328,7 +328,7 @@ String buildCountdownText(int remaining) {
 }
 
 String buildDriverDirection(float d) {
-  if (d < 0) return "NO SIGNAL";
+  if (d < 0) return "AWAITING CAR";
   if (currentZone == ZONE_NEXT_CAR) return "NEXT CAR";
   if (currentZone == ZONE_PROCEED) return "PROCEED";
   if (currentZone == ZONE_CAUTION) return "CAUTION";
@@ -544,6 +544,28 @@ int getEntryCloseDisplayCount() {
   bool gateClosingMotion = servoMoving && (servoTargetAngle == SERVO_CLOSED_ANGLE);
   if (gateClosingMotion) {
     return getMoveTimeDisplayCount(servoMoveStartMs, servoMoveDurationMs);
+  }
+
+  return 1;
+}
+
+int getExitCloseDisplayCount() {
+  bool exitClosingMotion = exitServoMoving && (exitServoTargetAngle == EXIT_SERVO_CLOSED_ANGLE);
+  if (exitClosingMotion) {
+    return getMoveTimeDisplayCount(exitServoMoveStartMs, exitServoMoveDurationMs);
+  }
+
+  if (exitCloseCountdownActive && exitGateOpen) {
+    unsigned long activeCloseMs = exitLimitCycleSeen ? NORMAL_CLOSE_COUNTDOWN_MS : EXIT_JOYSTICK_CLOSE_COUNTDOWN_MS;
+    unsigned long elapsed = millis() - exitCloseTimer;
+    if (elapsed >= activeCloseMs) {
+      return 1;
+    }
+
+    int remaining = (int)((activeCloseMs - elapsed + 999UL) / 1000UL);
+    if (remaining < 1) remaining = 1;
+    if (remaining > 9) remaining = 9;
+    return remaining;
   }
 
   return 1;
@@ -954,7 +976,7 @@ void loop() {
       if (remaining < 1) remaining = 1;
       if (remaining > 5) remaining = 5;
     }
-    gateText = "OPENING IN " + buildCountdownText(remaining);
+    gateText = "OPEN IN " + buildCountdownText(remaining);
   }
   else if (gateClosingMotion) {
     unsigned long elapsed = millis() - servoMoveStartMs;
@@ -964,7 +986,7 @@ void loop() {
       if (remaining < 1) remaining = 1;
       if (remaining > 5) remaining = 5;
     }
-    gateText = "CLOSING IN " + buildCountdownText(remaining);
+    gateText = "CLOSED IN " + buildCountdownText(remaining);
   }
   else if (gateOpen) {
     gateText = proceedConfirmPending ? "WAIT TOUCH" : "OPEN";
@@ -985,7 +1007,7 @@ void loop() {
   }
 
   // If an entry-open attempt is blocked by exit activity, show immediate wait notice.
-  bool entryAttemptFromApproach = (!gateOpen && carInOpenRange && limitStablePressed);
+  bool entryAttemptFromApproach = (!gateOpen && (limitPressed || limitStablePressed || touchPressed));
   bool entryAttemptFromClosingReopen = gateClosingMotion && (touchPressed || limitStablePressed);
   bool entryReopenTrigger = reclosePromptActive ? touchPressed : (touchPressed || limitPressed);
   bool entryAttemptFromCountdownReopen = waitingToClose && entryReopenTrigger;
@@ -1001,7 +1023,14 @@ void loop() {
   bool waitingOtherGate = ((entryMoveQueued || exitMoveQueued) && (servoMoving || exitServoMoving)) || entryWaitingOnExit;
   if (waitingOtherGate) {
     directionText = "PLEASE WAIT";
-    gateText = "EXIT ACTIVE";
+    bool exitClosingMotion = exitServoMoving && (exitServoTargetAngle == EXIT_SERVO_CLOSED_ANGLE);
+    if (entryWaitingOnExit && exitCloseCountdownActive) {
+      gateText = "EXIT CLOSING IN " + buildCountdownText(getExitCloseDisplayCount());
+    } else if (entryWaitingOnExit && exitClosingMotion) {
+      gateText = "EXIT CLOSED IN " + buildCountdownText(getExitCloseDisplayCount());
+    } else {
+      gateText = "EXIT ACTIVE";
+    }
   }
 
   // Top line: driver direction. Bottom line: gate condition.
